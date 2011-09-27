@@ -143,7 +143,7 @@ attachments(Boundary, [{FileName,ContentType,Data}|Rest]) ->
      mk_header("Content-Disposition",
                "attachment; filename=\"" ++ FileName ++ "\""),
      ?NL,
-     base64:encode_to_string(Data),
+     base64:encode(Data),
      attachments(Boundary, Rest)
     ];
 attachments(Boundary, [FileName|Rest]) when is_list(FileName) ->
