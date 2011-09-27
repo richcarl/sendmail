@@ -36,13 +36,13 @@
 
 -export([create/4,
          create/5,
-	 send/4,
-	 send/5,
-	 send_data/4]).
+         send/4,
+         send/5,
+         send_data/4]).
 
 -include_lib("eunit/include/eunit.hrl").
 
--ignore_xref([create/4,create/5,send/4,send_data/4]).
+-ignore_xref([create/4, create/5, send/4, send_data/4]).
 
 -define(NL, "\n").    % unix sendmail expects LF-terminated lines
 
@@ -115,13 +115,13 @@ data(From, To, Subject, Message, Opts0) ->
               Message
              ];
          _ ->
-             Boundary=mk_boundary(),
+             Boundary = mk_boundary(),
              [
               mk_header("Mime-Version", "1.0"),
               mk_header("Content-Type",
                         ("Multipart/Mixed; boundary=\""
                          ++ Boundary ++ "\"")),
-              mk_header("Content-Transfer-Encoding","8bit"),
+              mk_header("Content-Transfer-Encoding", "8bit"),
               ?NL,
               "--", Boundary,
               ?NL,
@@ -135,83 +135,32 @@ data(From, To, Subject, Message, Opts0) ->
      end].
 
 attachments(Boundary, []) ->
-    [?NL,"--",Boundary,"--",?NL];
+    [?NL, "--", Boundary, "--", ?NL];
 attachments(Boundary, [{FileName,ContentType,Data}|Rest]) ->
-    [?NL,"--",Boundary,?NL,
+    [?NL, "--", Boundary, ?NL,
      mk_header("Content-Type", ContentType),
      mk_header("Content-Transfer-Encoding", "base64"),
      mk_header("Content-Disposition",
                "attachment; filename=\"" ++ FileName ++ "\""),
      ?NL,
-     base64(to_str(Data)),
+     base64:encode_to_string(Data),
      attachments(Boundary, Rest)
     ];
 attachments(Boundary, [FileName|Rest]) when is_list(FileName) ->
     case file:read_file(FileName) of
         {ok, Data} ->
             ContentType = "application/octet-stream",  % safe default
-            attachments( Boundary
-                       , [{ filename:basename(FileName)
-                          , ContentType
-                          , Data
-                          } | Rest]);
+            attachments(Boundary,
+                        [{filename:basename(FileName),
+                          ContentType,
+                          Data} | Rest]);
         {error, Reason} ->
             throw({attachment_error, FileName, Reason})
     end.
 
-to_str(Bin) when is_binary(Bin) ->
-    binary_to_list(Bin);
-to_str(List) ->
-    List.
-
 mk_boundary() ->
-    {N1,N2,N3} = now(),
-    lists:flatten(io_lib:format("[~w:~w:~w]", [N1,N2,N3])).
-
-base64(String) ->
-    base64(String, []).
-
-base64([], Acc) ->
-    lists:reverse(Acc);
-base64(String, Acc) ->
-    case base64_line(String) of
-	{ok, Line, Rest} ->
-	    base64(Rest, [?NL,Line|Acc]);
-	{more, Cont} ->
-	    lists:reverse([?NL,base64_end(Cont)|Acc])
-    end.
-
-base64_line(S) -> base64_line(S, [], 0).
-
-base64_line(S, Out, 76) -> {ok,lists:reverse(Out),S};
-base64_line([C1,C2,C3|S], Out, N) ->
-    O1 = e(C1 bsr 2),
-    O2 = e(((C1 band 16#03) bsl 4) bor (C2 bsr 4)),
-    O3 = e(((C2 band 16#0f) bsl 2) bor (C3 bsr 6)),
-    O4 = e(C3 band 16#3f),
-    base64_line(S, [O4,O3,O2,O1|Out], N+4);
-base64_line(S, Out, N) ->
-    {more,{S,Out,N}}.
-
-base64_end({[C1,C2],Out,_N}) ->
-    O1 = e(C1 bsr 2),
-    O2 = e(((C1 band 16#03) bsl 4) bor (C2 bsr 4)),
-    O3 = e((C2 band 16#0f) bsl 2),
-    lists:reverse(Out, [O1,O2,O3,$=]);
-base64_end({[C1],Out,_N}) ->
-    O1 = e(C1 bsr 2),
-    O2 = e((C1 band 16#03) bsl 4),
-    lists:reverse(Out, [O1,O2,$=,$=]);
-base64_end({[],Out,_N}) -> lists:reverse(Out).
-
-e(X) when X >= 0, X < 26 -> X + $A;
-e(X) when X >= 26, X < 52 -> X + $a - 26;
-e(X) when X >= 52, X < 62 -> X + $0 - 52;
-e(62) -> $+;
-e(63) -> $/;
-e(X) -> erlang:error({badchar,X}).
-
-
+    {N1, N2, N3} = now(),
+    lists:flatten(io_lib:format("[~w:~w:~w]", [N1, N2, N3])).
 
 %% Make an arbitrary (IO-) string safe to pass into a shell command.
 %% Note that single quotes in the string are dropped.
@@ -229,7 +178,7 @@ shell_quote(String) ->
 %% * RFC822 specifies the header layout in greater detail.
 
 mk_header(_Key, []) -> [];
-mk_header(Key, Val) -> Key++": "++Val++?NL.
+mk_header(Key, Val) -> Key ++ ": " ++ Val ++ ?NL.
 
 -define(CONT, (?NL ++ " ")). % continues field on new line
 -define(MAX_LENGTH, 76).     % RFC1522 - max length of line in multiline field
