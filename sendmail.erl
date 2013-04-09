@@ -34,15 +34,15 @@
 
 -module(sendmail).
 
--export([create/4,
-         create/5,
-         send/4,
-         send/5,
-         send_data/4]).
+-export([ create/4
+        , create/5
+        , send/4
+        , send/5
+        , send_data/3
+        , send_data/4
+        ]).
 
 -include_lib("eunit/include/eunit.hrl").
-
--ignore_xref([create/4, create/5, send/4, send_data/4]).
 
 -define(NL, "\n").    % unix sendmail expects LF-terminated lines
 
@@ -66,34 +66,54 @@ send_data(To, From, Data, _Opts) ->
     %% (in that case, this module should probably be renamed)
     sendmail(From, To, Data).
 
+%% returns {ExitCode, CmdOutput}
+send_data(From, Data, _Opts) ->
+    sendmail(From, Data).
 
 %% ------------------------------------------------------------------------
 %% The rest is internal functionality
 
 sendmail(From, To, Data) ->
+    PortCmd = port_cmd(From, shell_quote(To)),
+    sendmail_1(PortCmd, Data).
+
+%% Extract recipients from the message headers instead of manually
+%% specifying them.
+sendmail(From, Data) ->
+    %% sendmail options used:
+    %%   -t  : extract recipients from message headers
+    PortCmd = port_cmd(From, "-t"),
+    sendmail_1(PortCmd, Data).
+
+port_cmd(From, ExtraOpts) ->
     %% sendmail options used:
     %%   -f  : set envelope sender (can only be done by trusted user)
-    %%   -bm : message on stdin, receivers on command line
-    %% TODO: use spawn_executable to avoid need for shell quote
-    P = open_port({spawn, "/usr/sbin/sendmail -f " ++ From ++
-		   " -bm " ++ shell_quote(To)},
-		  [stderr_to_stdout]),
-    P ! {self(), {command, Data}},
-    P ! {self(), close},
-    sendmail_wait(P, []).
+    %%   -bm : message on stdin
+    "/usr/sbin/sendmail -bm -f " ++ From ++ " " ++ ExtraOpts.
 
-%% This sucks: I see no way of collecting the output and getting
-%% the exit code when *we* are the ones who close the connection
-%% (since sendmail will read stdin until EOF).
-sendmail_wait(P, Ds) ->
+sendmail_1(PortCmd, Data) ->
+    %% TODO: use spawn_executable to avoid need for shell quote
+    P = open_port({spawn, PortCmd}, [stderr_to_stdout, exit_status, eof]),
+    %% sendmail reads its standard input up to a line consisting only of a
+    %% single dot
+    P ! {self(), {command, [Data, "\n.\n"]}},
+    sendmail_wait(P, undefined, false, []).
+
+sendmail_wait(P, Status, true = _Eof, Ds) when Status =/= undefined ->
+    erlang:port_close(P),
+    {Status, lists:flatten(lists:reverse(Ds))};
+sendmail_wait(P, Status, Eof, Ds) ->
     receive
-	{P, {data, D}} ->
-	    sendmail_wait(P, [D|Ds]);
-        {P, closed} ->
-            lists:flatten(lists:reverse(Ds))
+        {P, eof} ->
+            sendmail_wait(P, Status, true, Ds);
+        {P, {data, D}} ->
+            sendmail_wait(P, Status, Eof, [D|Ds]);
+        {P, {exit_status, S}} ->
+            sendmail_wait(P, S, Eof, Ds)
     after 15000 ->
-            "sendmail command timed out\n"
-                ++ lists:flatten(lists:reverse(Ds))
+            erlang:port_close(P),
+            {undefined, "sendmail command timed out\n" ++
+                lists:flatten(lists:reverse(Ds))}
     end.
 
 data(From, To, Subject, Message, Opts0) ->
